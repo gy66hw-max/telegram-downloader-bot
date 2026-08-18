@@ -9,7 +9,24 @@ from coins import coins_router
 from coupons import coupons_router
 from developer import dev_router
 from services import worker
+import os
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# خادم ويب وهمي لإرضاء Render وتوفير منفذ Port
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is live!")
+
+def run_health_check_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+# تشغيل خادم الويب في خيط مستقل (Thread) في الخلفية
+Thread(target=run_health_check_server, daemon=True).start()
 logging.basicConfig(level=logging.INFO)
 
 async def main():
