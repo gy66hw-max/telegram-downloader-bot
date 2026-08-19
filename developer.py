@@ -3,11 +3,15 @@ import string
 import html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from config import ADMIN_ID
-from database import create_coupon, get_stats, get_top_users, reset_competition
+from database import (
+    create_coupon, get_stats, get_top_users, 
+    reset_competition, ban_user, unban_user
+)
 from keyboards import get_developer_keyboard, get_coupon_gen_inline, get_clean_confirm_inline
 from services import download_queue
 
@@ -16,10 +20,60 @@ dev_router = Router()
 class DevStates(StatesGroup):
     waiting_for_top_limit = State()
 
+# 🚫 أمر حظر مستخدم (مثال: /ban 123456789 أو /ban @username)
+@dev_router.message(Command("ban"), F.from_user.id == ADMIN_ID)
+async def cmd_ban_user(message: Message, command: CommandObject):
+    if not command.args:
+        await message.answer(
+            "❌ <b>طريقة الاستخدام الصحيحة:</b>\n"
+            "• <code>/ban 123456789</code>\n"
+            "• <code>/ban @username</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    target = command.args.strip()
+    clean_target = target.lstrip("@")
+    
+    if clean_target == str(ADMIN_ID):
+        await message.answer("❌ لا يمكنك حظر نفسك!")
+        return
+
+    success = ban_user(target)
+    if success:
+        await message.answer(f"🚫 <b>تم حظر المستخدم بنجاح!</b>\n🎯 الهدف: <code>{target}</code>", parse_mode="HTML")
+    else:
+        await message.answer(f"❌ لم يتم العثور على مستخدم بهذا المعرف أو اليوزر: <code>{target}</code>", parse_mode="HTML")
+
+# ✅ أمر إلغاء حظر مستخدم (مثال: /unban 123456789 أو /unban @username)
+@dev_router.message(Command("unban"), F.from_user.id == ADMIN_ID)
+async def cmd_unban_user(message: Message, command: CommandObject):
+    if not command.args:
+        await message.answer(
+            "❌ <b>طريقة الاستخدام الصحيحة:</b>\n"
+            "• <code>/unban 123456789</code>\n"
+            "• <code>/unban @username</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    target = command.args.strip()
+    success = unban_user(target)
+    if success:
+        await message.answer(f"✅ <b>تم إلغاء حظر المستخدم بنجاح!</b>\n🎯 الهدف: <code>{target}</code>", parse_mode="HTML")
+    else:
+        await message.answer(f"❌ لم يتم العثور على مستخدم بهذا المعرف أو اليوزر: <code>{target}</code>", parse_mode="HTML")
+
 @dev_router.callback_query(F.data == "cmd:dev_panel", F.from_user.id == ADMIN_ID)
 async def dev_panel(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text("👨‍💻 أهلاً بك في لوحة المطور الخاصة بالإدارة:", reply_markup=get_developer_keyboard())
+    panel_text = (
+        "👨‍💻 <b>أهلاً بك في لوحة المطور الخاصة بالإدارة:</b>\n\n"
+        "🛠️ <b>أوامر الحظر المباشرة:</b>\n"
+        "• <code>/ban ID أو @username</code> : لحظر مستخدم\n"
+        "• <code>/unban ID أو @username</code> : لإلغاء حظر مستخدم"
+    )
+    await callback.message.edit_text(panel_text, parse_mode="HTML", reply_markup=get_developer_keyboard())
 
 @dev_router.callback_query(F.data == "dev:stats", F.from_user.id == ADMIN_ID)
 async def show_stats(callback: CallbackQuery):
@@ -50,7 +104,6 @@ async def top_users(message: Message, state: FSMContext):
         top = get_top_users(limit)
         text = f"🏆 <b>أفضل {limit} مستخدم حسب الاستخدام:</b>\n\n"
         for idx, row in enumerate(top, 1):
-            # حماية الأسماء والمعرفات لتجنب كسر التنسيق
             name = html.escape(row['first_name'] or "مستخدم")
             username_str = f" (@{html.escape(row['username'])})" if row['username'] else ""
             text += f"{idx}. <b>{name}</b>{username_str}\n   └ المعرف: <code>{row['user_id']}</code> | الاستخدامات: <code>{row['usage_count']}</code>\n"
