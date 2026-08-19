@@ -1,17 +1,21 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+import html
+import os
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-from config import BOT_TOKEN
+from aiogram import Bot, Dispatcher
+from aiogram.types import ErrorEvent
+
+from config import BOT_TOKEN, ADMIN_ID
 from database import init_db
 from users import users_router
 from coins import coins_router
 from coupons import coupons_router
 from developer import dev_router
 from services import worker
-import os
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from middlewares import AntiSpamMiddleware, BanCheckMiddleware
 
 # خادم ويب وهمي لإرضاء Render وتوفير منفذ Port
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -27,6 +31,7 @@ def run_health_check_server():
 
 # تشغيل خادم الويب في خيط مستقل (Thread) في الخلفية
 Thread(target=run_health_check_server, daemon=True).start()
+
 logging.basicConfig(level=logging.INFO)
 
 async def main():
@@ -35,6 +40,38 @@ async def main():
     
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+
+    # 1. تفعيل فحص المحظورين عالمياً
+    dp.message.outer_middleware(BanCheckMiddleware())
+    dp.callback_query.outer_middleware(BanCheckMiddleware())
+
+    # 2. تفعيل نظام منع السبام (الفترة المسموحة: ثانية واحدة بين الطلبات)
+    dp.message.middleware(AntiSpamMiddleware(limit=1.0))
+    dp.callback_query.middleware(AntiSpamMiddleware(limit=1.0))
+
+    # 3. معالج الأخطاء العام لمنع انهيار البوت وتنبيه المطور
+    @dp.error()
+    async def global_error_handler(event: ErrorEvent):
+        logging.error(f"حدث خطأ غير متوقع: {event.exception}", exc_info=True)
+        
+        user = None
+        if event.update.message:
+            user = event.update.message.from_user
+        elif event.update.callback_query:
+            user = event.update.callback_query.from_user
+
+        user_info = f"👤 المستخدم: {user.first_name} (<code>{user.id}</code>)" if user else "غير معروف"
+
+        error_msg = (
+            f"⚠️ <b>حدث خطأ برمجي في البوت!</b>\n\n"
+            f"{user_info}\n"
+            f"🛠️ الخطأ: <code>{html.escape(str(event.exception))}</code>"
+        )
+        
+        try:
+            await bot.send_message(chat_id=ADMIN_ID, text=error_msg, parse_mode="HTML")
+        except Exception:
+            pass
 
     # تسجيل الموجهات
     dp.include_router(users_router)
