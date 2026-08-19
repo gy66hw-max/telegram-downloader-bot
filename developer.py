@@ -1,5 +1,6 @@
 import random
 import string
+import html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -26,15 +27,15 @@ async def show_stats(callback: CallbackQuery):
     users, usage, refs = get_stats()
     q_size = download_queue.qsize()
     msg = (
-        f"📊 **إحصائيات البوت العامة:**\n\n"
-        f"👥 إجمالي المستخدمين: `{users}`\n"
-        f"📥 إجمالي التحميلات: `{usage}`\n"
-        f"🔗 إجمالي الإحالات: `{refs}`\n\n"
-        f"⚙️ **حالة Engine التحميل:**\n"
-        f"📥 الطلبات المنتظرة بـ Queue: `{q_size}`\n"
-        f"⚡ عدد Workers النواة: `3`"
+        f"📊 <b>إحصائيات البوت العامة:</b>\n\n"
+        f"👥 إجمالي المستخدمين: <code>{users}</code>\n"
+        f"📥 إجمالي التحميلات: <code>{usage}</code>\n"
+        f"🔗 إجمالي الإحالات: <code>{refs}</code>\n\n"
+        f"⚙️ <b>حالة Engine التحميل:</b>\n"
+        f"📥 الطلبات المنتظرة بـ Queue: <code>{q_size}</code>\n"
+        f"⚡ عدد Workers النواة: <code>3</code>"
     )
-    await callback.message.edit_text(msg, parse_mode="Markdown", reply_markup=get_developer_keyboard())
+    await callback.message.edit_text(msg, parse_mode="HTML", reply_markup=get_developer_keyboard())
 
 @dev_router.callback_query(F.data == "dev:top_users", F.from_user.id == ADMIN_ID)
 async def ask_top_limit(callback: CallbackQuery, state: FSMContext):
@@ -47,12 +48,13 @@ async def top_users(message: Message, state: FSMContext):
     try:
         limit = int(message.text.strip())
         top = get_top_users(limit)
-        text = f"🏆 **أفضل {limit} مستخدم حسب الاستخدام:**\n\n"
+        text = f"🏆 <b>أفضل {limit} مستخدم حسب الاستخدام:</b>\n\n"
         for idx, row in enumerate(top, 1):
-            name = row['first_name'] or "مستخدم"
-            username_str = f" (@{row['username']})" if row['username'] else ""
-            text += f"{idx}. **{name}**{username_str}\n   └ المعرف: `{row['user_id']}` | الاستخدامات: `{row['usage_count']}`\n"
-        await message.answer(text, parse_mode="Markdown", reply_markup=get_developer_keyboard())
+            # حماية الأسماء والمعرفات لتجنب كسر التنسيق
+            name = html.escape(row['first_name'] or "مستخدم")
+            username_str = f" (@{html.escape(row['username'])})" if row['username'] else ""
+            text += f"{idx}. <b>{name}</b>{username_str}\n   └ المعرف: <code>{row['user_id']}</code> | الاستخدامات: <code>{row['usage_count']}</code>\n"
+        await message.answer(text, parse_mode="HTML", reply_markup=get_developer_keyboard())
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح.")
     await state.clear()
@@ -69,8 +71,8 @@ async def generate_coupon(callback: CallbackQuery):
     code = "COUPON-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     create_coupon(code, c_type)
     await callback.message.edit_text(
-        f"🎉 **تم إنشاء كوبون {c_type} جديد بنجاح!**\n\nالكود:\n`{code}`",
-        parse_mode="Markdown",
+        f"🎉 <b>تم إنشاء كوبون {c_type} جديد بنجاح!</b>\n\nالكود:\n<code>{code}</code>",
+        parse_mode="HTML",
         reply_markup=get_developer_keyboard()
     )
 
@@ -78,10 +80,10 @@ async def generate_coupon(callback: CallbackQuery):
 async def clean_prompt(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text(
-        "⚠️ **تأكيد مسح البيانات:**\n"
+        "⚠️ <b>تأكيد مسح البيانات:</b>\n"
         "هل أنت تأكيداً تريد مسح جميع إحصائيات استخدام الخدمة والإحالات لبدء مسابقة جديدة؟\n"
-        "*(سيتم الحفاظ الكامل على بيانات الحسابات والاشتراكات والعملات)*",
-        parse_mode="Markdown",
+        "<i>(سيتم الحفاظ الكامل على بيانات الحسابات والاشتراكات والعملات)</i>",
+        parse_mode="HTML",
         reply_markup=get_clean_confirm_inline()
     )
 
@@ -90,6 +92,6 @@ async def confirm_clean(callback: CallbackQuery):
     await callback.answer()
     reset_competition()
     await callback.message.edit_text(
-        "✅ **تم تصفير جميع الاستخدامات والإحالات بنجاح وبدء مسابقة جديدة!**",
+        "✅ <b>تم تصفير جميع الاستخدامات والإحالات بنجاح وبدء مسابقة جديدة!</b>",
         reply_markup=get_developer_keyboard()
     )
