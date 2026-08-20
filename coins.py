@@ -23,14 +23,15 @@ async def process_sub_buy(callback: CallbackQuery):
     await callback.answer(msg, show_alert=True)
     if success:
         await callback.message.edit_text(msg)
-        # إرسال إشعار للداعي بحصوله على +2 عملة إضافية عند شراء اشتراك
+        # إرسال إشعار للداعي بحصوله على +3 عملات إضافية عند شراء الاشتراك
         if referrer_id:
             try:
                 safe_name = html.escape(callback.from_user.first_name or "مستخدم")
                 sub_msg = (
-                    f"🎉 <b>خبر سار!</b>\n\n"
+                    f"🔥 <b>مكافأة اشتراك إحالة!</b>\n\n"
                     f"قام المستخدم <b>{safe_name}</b> (الذي انضم عبر رابطك) بتفعيل اشتراكه! 🚀\n"
-                    f"🪙 تمت إضافة <b>+2 عملة إضافية</b> إلى رصيدك بنجاح!"
+                    f"🪙 تمت إضافة <b>+3 عملات إضافية</b> إلى رصيدك بنجاح!\n"
+                    f"✨ <i>اكتملت مكافأة الدعوة لهذا المستخدم (المجموع: 5 عملات).</i>"
                 )
                 await callback.bot.send_message(chat_id=referrer_id, text=sub_msg, parse_mode="HTML")
             except Exception as e:
