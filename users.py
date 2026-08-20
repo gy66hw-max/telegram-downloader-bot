@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-
+from aiogram.exceptions import TelegramBadRequest
 from config import ADMIN_ID, DEV_USERNAME
 from database import (
     get_or_create_user, check_sub_status, increment_usage, 
@@ -48,9 +48,10 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
         if referrer_info:
             try:
                 ref_msg = (
-                    f"🎉 <b>انضم مستخدم جديد عبر رابط الإحالة الخاص بك!</b>\n\n"
-                    f"👤 <b>الاسم:</b> {safe_name}\n"
-                    f"🪙 تمت إضافة <b>+1 عملة</b> إلى رصيدك بنجاح!"
+                    f"🎉 <b>إحالة جديدة!</b>\n\n"
+                    f"👤 انضم <b>{safe_name}</b> عبر رابط الدعوة الخاص بك.\n"
+                    f"🪙 تمت إضافة <b>+2 عملة</b> إلى رصيدك بنجاح!\n"
+                    f"💡 <i>ستحصل على +3 عملات إضافية فور تفعيله لأي اشتراك (المجموع: 5 عملات).</i>"
                 )
                 await message.bot.send_message(chat_id=referrer_info['user_id'], text=ref_msg, parse_mode="HTML")
             except Exception as e:
@@ -120,23 +121,36 @@ async def my_sub(callback: CallbackQuery):
             reply_markup=get_sub_purchase_inline()
         )
 
+
 @users_router.callback_query(F.data == "cmd:ref_link")
 async def ref_link(callback: CallbackQuery):
     if is_user_banned(callback.from_user.id):
         await callback.answer("🚫 أنت محظور من استخدام البوت", show_alert=True)
         return
-    await callback.answer()
+    
     bot_info = await callback.bot.get_me()
     link = f"https://t.me/{bot_info.username}?start=ref_{callback.from_user.id}"
-    await callback.message.edit_text(
-        f"🔗 **رابط الإحالة الخاص بك:**\n`{link}`\n\n"
-        f"🎁 **مكافآت نظام الإحالة:**\n"
-        f"• عند دخول شخص عبر رابطك: تحصل على **+1 عملة** فوراً.\n"
-        f"• عند تفعيل هذا الشخص لاشتراك: تحصل على **+2 عملة إضافية** (تصبح 3 عملات إجمالاً).", 
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard(callback.from_user.id)
+    
+    ref_text = (
+        f"🔗 <b>رابط الإحالة الخاص بك:</b>\n"
+        f"<code>{link}</code>\n\n"
+        f"🎁 <b>نظام مكافآت الإحالة الجديد:</b>\n"
+        f"• عند دخول شخص عبر رابطك: تحصل على <b>+2 عملة</b> فوراً.\n"
+        f"• عند تفعيل هذا الشخص لأي اشتراك: تحصل على <b>+3 عملات إضافية</b>.\n"
+        f"✨ <i>إجمالي المكافأة: <b>5 عملات</b> لكل شخص تدعوه!</i>"
     )
-
+    
+    try:
+        await callback.message.edit_text(
+            ref_text, 
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard(callback.from_user.id)
+        )
+        await callback.answer() # تم التعديل بنجاح
+    except TelegramBadRequest:
+        # إذا لم يتغير المحتوى، لا تفعل شيئاً سوى إغلاق التنبيه
+        await callback.answer("أنت تشاهد الرسالة بالفعل.")
+        
 @users_router.callback_query(F.data == "cmd:use_service")
 async def ask_for_link(callback: CallbackQuery, state: FSMContext):
     if is_user_banned(callback.from_user.id):
