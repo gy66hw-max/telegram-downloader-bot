@@ -115,7 +115,8 @@ def get_or_create_user(user_id: int, first_name: str = None, username: str = Non
                 (user_id, first_name, username, referrer_id if referrer_id != user_id else None)
             )
             if referrer_id and referrer_id != user_id:
-                cursor.execute("UPDATE users SET coins = coins + 1 WHERE user_id = ?", (referrer_id,))
+                # 🎁 إعطاء 2 عملة للمحيل فور دخول مستخدم جديد
+                cursor.execute("UPDATE users SET coins = coins + 2 WHERE user_id = ?", (referrer_id,))
             conn.commit()
             
             cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -145,7 +146,8 @@ def trigger_ref_activation_bonus(user_id: int):
         user = cursor.fetchone()
         if user and user["referred_by"] and user["ref_activated"] == 0:
             referrer_id = user["referred_by"]
-            cursor.execute("UPDATE users SET coins = coins + 2 WHERE user_id = ?", (referrer_id,))
+            # 🎁 إعطاء 3 عملات إضافية عندما يشترك المستخدم (يصبح إجمالي المكافأة 5 عملات)
+            cursor.execute("UPDATE users SET coins = coins + 3 WHERE user_id = ?", (referrer_id,))
             cursor.execute("UPDATE users SET ref_activated = 1 WHERE user_id = ?", (user_id,))
             conn.commit()
             return referrer_id
