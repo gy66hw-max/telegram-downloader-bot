@@ -23,14 +23,15 @@ async def process_coupon(message: Message, state: FSMContext):
     await message.answer(msg)
     await state.clear()
     
-    # إرسال إشعار للداعي بحصوله على +2 عملة إضافية عند تفعيل اشتراك عبر كوبون
+    # إرسال إشعار للداعي بحصوله على +3 عملات إضافية عند تفعيل اشتراك عبر كوبون
     if success and referrer_id:
         try:
             safe_name = html.escape(message.from_user.first_name or "مستخدم")
             sub_msg = (
-                f"🎉 <b>خبر سار!</b>\n\n"
+                f"🔥 <b>مكافأة اشتراك إحالة!</b>\n\n"
                 f"قام المستخدم <b>{safe_name}</b> (الذي انضم عبر رابطك) بتفعيل اشتراكه عبر كوبون! 🚀\n"
-                f"🪙 تمت إضافة <b>+2 عملة إضافية</b> إلى رصيدك بنجاح!"
+                f"🪙 تمت إضافة <b>+3 عملات إضافية</b> إلى رصيدك بنجاح!\n"
+                f"✨ <i>اكتملت مكافأة الدعوة لهذا المستخدم (المجموع: 5 عملات).</i>"
             )
             await message.bot.send_message(chat_id=referrer_id, text=sub_msg, parse_mode="HTML")
         except Exception as e:
