@@ -8,6 +8,6 @@ DB_NAME = "bot_database.db"
 SUB_PRICES = {
     "daily": 10,     # يومي
     "weekly": 20,    # أسبوعي
-    "monthly": 100   # شهري
+    "monthly": 50   # شهري
 }
 DEV_USERNAME = "ishaqrv"  # ضع يوزرك هنا بدون @
