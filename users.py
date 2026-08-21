@@ -95,6 +95,21 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
                 f"💬 <i>{html.escape(custom_msg)}</i>"
             )
             await message.answer(gift_notice, parse_mode="HTML")
+
+            # 🚨 إشعار فوري للمطور في حال أصبح الرابط ممتلئاً بالكامل بعد هذه المطالبة
+            if status == "JUST_FILLED":
+                try:
+                    safe_claimer = html.escape(message.from_user.first_name or "مستخدم")
+                    admin_gift_alert = (
+                        f"🎁 <b>تنبيه للمطور: رابط المكافأة امتلأ بالكامل!</b>\n\n"
+                        f"🔑 <b>كود الرابط:</b> <code>{gift_code}</code>\n"
+                        f"👤 <b>تم إكمال العدد بواسطة:</b> {safe_claimer} [<code>{message.from_user.id}</code>]\n"
+                        f"📌 <b>الحالة:</b> استُهلكت جميع الاستخدامات المتاحة لهذا الرابط وانتهى الآن."
+                    )
+                    await message.bot.send_message(chat_id=ADMIN_ID, text=admin_gift_alert, parse_mode="HTML")
+                except Exception as e:
+                    print(f"فشل إرسال إشعار امتلاء الرابط للمطور: {e}")
+
         elif status == "ALREADY_CLAIMED":
             await message.answer("⚠️ <b>لقد قمت باستلام هذه المكافأة سابقاً!</b>", parse_mode="HTML")
         elif status == "EXPIRED":
@@ -106,7 +121,7 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
         if not is_new:
             return
 
-    # 4. عرض الكليشة والقائمة الرئيسية (للمستخدمين الجدد أو عند الضغط على /start العادي)
+    # 4. عرض الكليشة والقائمة الرئيسية
     ref_count = get_user_ref_count(message.from_user.id)
     user_coins = user['coins']
     safe_user_name = html.escape(message.from_user.first_name or "مستخدم")
