@@ -89,7 +89,7 @@ def ban_user(target: str) -> bool:
             )
         else:
             cursor.execute(
-                "UPDATE users SET is_banned = 0 WHERE LOWER(username) = LOWER(?)",
+                "UPDATE users SET is_banned = 1 WHERE LOWER(username) = LOWER(?)",
                 (clean_target,)
             )
         conn.commit()
@@ -279,7 +279,7 @@ def create_gift_link(code: str, reward_type: str, reward_amount: int, max_uses: 
         conn.commit()
 
 def claim_gift_link(user_id: int, code: str):
-    """معالجة مطالبات وروابط الجوائز المؤقتة"""
+    """معالجة مطالبات وروابط الجوائز المؤقتة وإرجاع حالة امتلاء الرابط"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT reward_type, reward_amount, max_uses, current_uses, custom_message FROM gift_links WHERE code = ?", (code,))
@@ -294,7 +294,7 @@ def claim_gift_link(user_id: int, code: str):
         current_uses = link["current_uses"]
         custom_message = link["custom_message"]
 
-        # 1. التحقق من اكتمال العدد
+        # 1. التحقق من اكتمال العدد مسبقاً
         if current_uses >= max_uses:
             return False, "EXPIRED", None, custom_message
 
@@ -304,18 +304,22 @@ def claim_gift_link(user_id: int, code: str):
             return False, "ALREADY_CLAIMED", None, custom_message
 
         # 3. تسجيل المطالبة وزيادة العداد
+        new_uses = current_uses + 1
         cursor.execute("INSERT INTO gift_claims (code, user_id) VALUES (?, ?)", (code, user_id))
-        cursor.execute("UPDATE gift_links SET current_uses = current_uses + 1 WHERE code = ?", (code,))
+        cursor.execute("UPDATE gift_links SET current_uses = ? WHERE code = ?", (new_uses, code))
+
+        # تحديد ما إذا كان هذا الاستخدام هو الأخير لتعيين الحالة إلى JUST_FILLED
+        status = "JUST_FILLED" if new_uses >= max_uses else "SUCCESS"
 
         # 4. تسليم الجائزة حسب النوع
         if reward_type == "coins":
             cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (reward_amount, user_id))
             conn.commit()
-            return True, "SUCCESS", f"🪙 +{reward_amount} عملة", custom_message
+            return True, status, f"🪙 +{reward_amount} عملة", custom_message
         else:
             conn.commit()
             exp_str = add_sub_days(user_id, reward_amount)
-            return True, "SUCCESS", f"⭐ +{reward_amount} يوم اشتراك مجاني (حتى {exp_str})", custom_message
+            return True, status, f"⭐ +{reward_amount} يوم اشتراك مجاني (حتى {exp_str})", custom_message
 
 # --- الإحصائيات والكاش ---
 
