@@ -17,12 +17,22 @@ from developer import dev_router
 from services import worker
 from middlewares import AntiSpamMiddleware, BanCheckMiddleware
 
-# خادم ويب وهمي لإرضاء Render وتوفير منفذ Port
+# خادم ويب وهمي متكامل لإرضاء Render وتمرير فحص الصحة (Health Check)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"Bot is live!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+
+    # إخفاء سجلات طلبات الفحص المتكررة لتعديل وتنظيف الـ Logs
+    def log_message(self, format, *args):
+        return
 
 def run_health_check_server():
     port = int(os.environ.get("PORT", 8080))
