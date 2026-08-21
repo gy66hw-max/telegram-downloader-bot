@@ -1,8 +1,9 @@
 import random
 import string
 import html
+import secrets
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -10,7 +11,7 @@ from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_ID
 from database import (
     create_coupon, get_stats, get_top_users, 
-    reset_competition, ban_user, unban_user
+    reset_competition, ban_user, unban_user, create_gift_link
 )
 from keyboards import get_developer_keyboard, get_coupon_gen_inline, get_clean_confirm_inline
 from services import download_queue
@@ -19,6 +20,9 @@ dev_router = Router()
 
 class DevStates(StatesGroup):
     waiting_for_top_limit = State()
+    waiting_for_gift_amount = State()
+    waiting_for_gift_max_uses = State()
+    waiting_for_gift_message = State()
 
 # 🚫 أمر حظر مستخدم (مثال: /ban 123456789 أو /ban @username)
 @dev_router.message(Command("ban"), F.from_user.id == ADMIN_ID)
@@ -128,6 +132,101 @@ async def generate_coupon(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=get_developer_keyboard()
     )
+
+# 🎁 --- نظام إنشاء رابط المكافأة المحدودة ---
+
+@dev_router.callback_query(F.data == "dev:create_gift", F.from_user.id == ADMIN_ID)
+async def start_gift_creation(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🪙 عملات مجانية", callback_data="gift_type:coins")],
+        [InlineKeyboardButton(text="⭐ أيام اشتراك مجاني", callback_data="gift_type:sub_days")]
+    ])
+    await callback.message.edit_text(
+        "🎁 <b>اختر نوع المكافأة المراد إنشاؤها للرابط:</b>",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+
+@dev_router.callback_query(F.data.startswith("gift_type:"), F.from_user.id == ADMIN_ID)
+async def process_gift_type(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    reward_type = callback.data.split(":")[1]
+    await state.update_data(reward_type=reward_type)
+    
+    text = "🪙 <b>أدخل عدد العملات المراد تقديمها كمكافأة:</b>" if reward_type == "coins" else "📅 <b>أدخل عدد أيام الاشتراك (مثلاً 1 لليومي، 7 للأسبوعي):</b>"
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await state.set_state(DevStates.waiting_for_gift_amount)
+
+@dev_router.message(DevStates.waiting_for_gift_amount, F.from_user.id == ADMIN_ID)
+async def process_gift_amount(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        return await message.answer("❌ يرجى إدخال رقم صحيح!")
+    
+    await state.update_data(reward_amount=int(message.text.strip()))
+    await message.answer(
+        "👥 <b>أدخل عدد الأشخاص المسموح لهم بالدخول والاستفادة من الرابط (الحد الأقصى):</b>\n"
+        "<i>مثال: 8 أو 40 أو 233</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(DevStates.waiting_for_gift_max_uses)
+
+@dev_router.message(DevStates.waiting_for_gift_max_uses, F.from_user.id == ADMIN_ID)
+async def process_gift_max_uses(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        return await message.answer("❌ يرجى إدخال رقم صحيح!")
+    
+    await state.update_data(max_uses=int(message.text.strip()))
+    await message.answer(
+        "✍️ <b>أدخل النص/الرسالة التشجيعية التي تظهر للمستخدم عند استلام المكافأة:</b>\n"
+        "<i>(أرسل كلمة <code>تخطي</code> لاستخدام الرسالة الافتراضية)</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(DevStates.waiting_for_gift_message)
+
+@dev_router.message(DevStates.waiting_for_gift_message, F.from_user.id == ADMIN_ID)
+async def process_gift_message(message: Message, state: FSMContext):
+    data = await state.get_data()
+    msg_text = message.text.strip()
+    custom_msg = msg_text if msg_text != "تخطي" else "مبارك لك! أسرعت وأخذت المكافأة بنجاح 🥳✨"
+    
+    # توليد رمز فريد للرابط
+    code = "gift_" + secrets.token_hex(4)
+    
+    # حفظ البيانات في قاعدة البيانات
+    create_gift_link(
+        code=code,
+        reward_type=data['reward_type'],
+        reward_amount=data['reward_amount'],
+        max_uses=data['max_uses'],
+        custom_message=custom_msg
+    )
+    
+    bot_info = await message.bot.get_me()
+    gift_url = f"https://t.me/{bot_info.username}?start={code}"
+    
+    type_name = "عملة مجانية 🪙" if data['reward_type'] == "coins" else "يوم اشتراك مجاني ⭐"
+    
+    # 📝 التصميم الجديد المرتب الجاهز للنشر
+    formatted_message = (
+        f"🎁 <b>رابط مكافأة جديد للجميع!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"• <b>المكافأة:</b> <code>{data['reward_amount']} {type_name}</code>\n"
+        f"• <b>الحد الأقصى:</b> لـ <code>{data['max_uses']}</code> عضو فقط 👥\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔗 <b>رابط الاستلام المباشر:</b>\n"
+        f"<code>{gift_url}</code>\n\n"
+        f"⚡ <i>سارع بالضغط على الرابط قبل نفاد العدد!</i> 🚀"
+    )
+    
+    await message.answer(
+        formatted_message,
+        parse_mode="HTML",
+        reply_markup=get_developer_keyboard()
+    )
+    await state.clear()
+
+# ⚠️ --- تصفير المسابقة والنظام ---
 
 @dev_router.callback_query(F.data == "dev:clean_prompt", F.from_user.id == ADMIN_ID)
 async def clean_prompt(callback: CallbackQuery):
