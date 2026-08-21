@@ -25,6 +25,7 @@ def get_main_keyboard(user_id: int):
 def get_developer_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🎁 إنشاء رابط مكافأة", callback_data="dev:create_gift")],
             [InlineKeyboardButton(text="🎟️ إدارة الكوبونات", callback_data="dev:coupons")],
             [
                 InlineKeyboardButton(text="📊 الإحصائيات", callback_data="dev:stats"),
