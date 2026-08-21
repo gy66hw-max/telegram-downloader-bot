@@ -11,7 +11,7 @@ def init_db():
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # جدول المستخدمين
+        # 1. جدول المستخدمين
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -33,7 +33,7 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # جدول الكوبونات
+        # 2. جدول الكوبونات
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS coupons (
                 code TEXT PRIMARY KEY,
@@ -43,7 +43,7 @@ def init_db():
             )
         ''')
 
-        # جدول التخزين المؤقت للروابط
+        # 3. جدول التخزين المؤقت للروابط
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS file_cache (
                 url TEXT PRIMARY KEY,
@@ -51,8 +51,31 @@ def init_db():
                 file_type TEXT
             )
         ''')
+
+        # 4. جدول روابط المكافآت المحدودة
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gift_links (
+                code TEXT PRIMARY KEY,
+                reward_type TEXT,
+                reward_amount INTEGER,
+                max_uses INTEGER,
+                current_uses INTEGER DEFAULT 0,
+                custom_message TEXT
+            )
+        ''')
+
+        # 5. جدول مطالبات المكافآت (لمنع التكرار)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gift_claims (
+                code TEXT,
+                user_id INTEGER,
+                PRIMARY KEY (code, user_id)
+            )
+        ''')
         
         conn.commit()
+
+# --- إدارة الحظر والوصول ---
 
 def ban_user(target: str) -> bool:
     """حظر مستخدم بواسطة المعرف الرقمي أو اليوزرنيم"""
@@ -66,7 +89,7 @@ def ban_user(target: str) -> bool:
             )
         else:
             cursor.execute(
-                "UPDATE users SET is_banned = 1 WHERE LOWER(username) = LOWER(?)",
+                "UPDATE users SET is_banned = 0 WHERE LOWER(username) = LOWER(?)",
                 (clean_target,)
             )
         conn.commit()
@@ -97,6 +120,8 @@ def is_user_banned(user_id: int) -> bool:
         cursor.execute("SELECT is_banned FROM users WHERE user_id = ?", (user_id,))
         res = cursor.fetchone()
         return bool(res and res["is_banned"] == 1)
+
+# --- إدارة المستخدمين والإحالات ---
 
 def get_or_create_user(user_id: int, first_name: str = None, username: str = None, referrer_id: int = None):
     with get_db() as conn:
@@ -146,7 +171,7 @@ def trigger_ref_activation_bonus(user_id: int):
         user = cursor.fetchone()
         if user and user["referred_by"] and user["ref_activated"] == 0:
             referrer_id = user["referred_by"]
-            # 🎁 إعطاء 3 عملات إضافية عندما يشترك المستخدم (يصبح إجمالي المكافأة 5 عملات)
+            # 🎁 إعطاء 3 عملات إضافية عندما يشترك المستخدم (إجمالي المكافأة 5 عملات)
             cursor.execute("UPDATE users SET coins = coins + 3 WHERE user_id = ?", (referrer_id,))
             cursor.execute("UPDATE users SET ref_activated = 1 WHERE user_id = ?", (user_id,))
             conn.commit()
@@ -158,16 +183,43 @@ def increment_usage(user_id: int):
         conn.execute("UPDATE users SET usage_count = usage_count + 1 WHERE user_id = ?", (user_id,))
         conn.commit()
 
+# --- إدارة الاشتراكات والكوبونات ---
+
 def check_sub_status(user_id: int):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT sub_expire FROM users WHERE user_id = ?", (user_id,))
         res = cursor.fetchone()
         if res and res["sub_expire"]:
-            expire_dt = datetime.strptime(res["sub_expire"], "%Y-%m-%d %H:%M:%S")
-            if expire_dt > datetime.now():
-                return True, expire_dt
+            try:
+                expire_dt = datetime.strptime(res["sub_expire"], "%Y-%m-%d %H:%M:%S")
+                if expire_dt > datetime.now():
+                    return True, expire_dt
+            except ValueError:
+                pass
         return False, None
+
+def add_sub_days(user_id: int, days: int) -> str:
+    """دالة مساعدة لإضافة/تمديد أيام اشتراك مستخدم"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT sub_expire FROM users WHERE user_id = ?", (user_id,))
+        user = cursor.fetchone()
+        now = datetime.now()
+        
+        if user and user["sub_expire"]:
+            try:
+                current_exp = datetime.strptime(user["sub_expire"], "%Y-%m-%d %H:%M:%S")
+                new_exp = (current_exp if current_exp > now else now) + timedelta(days=days)
+            except ValueError:
+                new_exp = now + timedelta(days=days)
+        else:
+            new_exp = now + timedelta(days=days)
+
+        new_exp_str = new_exp.strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("UPDATE users SET sub_expire = ? WHERE user_id = ?", (new_exp_str, user_id))
+        conn.commit()
+        return new_exp.strftime("%Y-%m-%d %H:%M")
 
 def buy_sub_with_coins(user_id: int, plan_type: str):
     if plan_type not in SUB_PRICES:
@@ -178,28 +230,19 @@ def buy_sub_with_coins(user_id: int, plan_type: str):
 
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT coins, sub_expire FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
         user = cursor.fetchone()
 
         if not user or user["coins"] < cost:
             return False, f"❌ رصيدك غير كافٍ! تحتاج إلى {cost} عملة.", None
 
-        now = datetime.now()
-        if user["sub_expire"]:
-            current_exp = datetime.strptime(user["sub_expire"], "%Y-%m-%d %H:%M:%S")
-            new_exp = (current_exp if current_exp > now else now) + timedelta(days=days)
-        else:
-            new_exp = now + timedelta(days=days)
-
-        new_coins = user["coins"] - cost
-        conn.execute(
-            "UPDATE users SET coins = ?, sub_expire = ? WHERE user_id = ?",
-            (new_coins, new_exp.strftime("%Y-%m-%d %H:%M:%S"), user_id)
-        )
+        # خصم العملات
+        conn.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (cost, user_id))
         conn.commit()
-    
+
+    exp_date_str = add_sub_days(user_id, days)
     referrer_id = trigger_ref_activation_bonus(user_id)
-    return True, f"🎉 تم شراء الاشتراك الـ {plan_type} بنجاح حتى {new_exp.strftime('%Y-%m-%d %H:%M')}!", referrer_id
+    return True, f"🎉 تم شراء الاشتراك الـ {plan_type} بنجاح حتى {exp_date_str}!", referrer_id
 
 def create_coupon(code: str, coupon_type: str):
     with get_db() as conn:
@@ -217,22 +260,64 @@ def redeem_coupon(user_id: int, code: str):
         c_type = coupon["coupon_type"]
         days = 1 if c_type == "daily" else (7 if c_type == "weekly" else 30)
         
-        cursor.execute("SELECT sub_expire FROM users WHERE user_id = ?", (user_id,))
-        user = cursor.fetchone()
-        now = datetime.now()
-        
-        if user and user["sub_expire"]:
-            exp = datetime.strptime(user["sub_expire"], "%Y-%m-%d %H:%M:%S")
-            new_exp = (exp if exp > now else now) + timedelta(days=days)
-        else:
-            new_exp = now + timedelta(days=days)
-
-        conn.execute("UPDATE users SET sub_expire = ? WHERE user_id = ?", (new_exp.strftime("%Y-%m-%d %H:%M:%S"), user_id))
         conn.execute("UPDATE coupons SET is_used = 1, used_by = ? WHERE code = ?", (user_id, code))
         conn.commit()
-    
+
+    exp_date_str = add_sub_days(user_id, days)
     referrer_id = trigger_ref_activation_bonus(user_id)
-    return True, f"🎉 تم تفعيل الكوبون الـ {c_type} بنجاح حتى {new_exp.strftime('%Y-%m-%d %H:%M')}!", referrer_id
+    return True, f"🎉 تم تفعيل الكوبون الـ {c_type} بنجاح حتى {exp_date_str}!", referrer_id
+
+# --- نظام روابط المكافآت المحدودة ---
+
+def create_gift_link(code: str, reward_type: str, reward_amount: int, max_uses: int, custom_message: str):
+    """حفظ رابط مكافأة جديد في قاعدة البيانات"""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO gift_links (code, reward_type, reward_amount, max_uses, custom_message)
+            VALUES (?, ?, ?, ?, ?)
+        """, (code, reward_type, reward_amount, max_uses, custom_message))
+        conn.commit()
+
+def claim_gift_link(user_id: int, code: str):
+    """معالجة مطالبات وروابط الجوائز المؤقتة"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT reward_type, reward_amount, max_uses, current_uses, custom_message FROM gift_links WHERE code = ?", (code,))
+        link = cursor.fetchone()
+
+        if not link:
+            return False, "NOT_FOUND", None, None
+
+        reward_type = link["reward_type"]
+        reward_amount = link["reward_amount"]
+        max_uses = link["max_uses"]
+        current_uses = link["current_uses"]
+        custom_message = link["custom_message"]
+
+        # 1. التحقق من اكتمال العدد
+        if current_uses >= max_uses:
+            return False, "EXPIRED", None, custom_message
+
+        # 2. التحقق مما إذا كان المستخدم استلم المكافأة سابقاً
+        cursor.execute("SELECT 1 FROM gift_claims WHERE code = ? AND user_id = ?", (code, user_id))
+        if cursor.fetchone():
+            return False, "ALREADY_CLAIMED", None, custom_message
+
+        # 3. تسجيل المطالبة وزيادة العداد
+        cursor.execute("INSERT INTO gift_claims (code, user_id) VALUES (?, ?)", (code, user_id))
+        cursor.execute("UPDATE gift_links SET current_uses = current_uses + 1 WHERE code = ?", (code,))
+
+        # 4. تسليم الجائزة حسب النوع
+        if reward_type == "coins":
+            cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (reward_amount, user_id))
+            conn.commit()
+            return True, "SUCCESS", f"🪙 +{reward_amount} عملة", custom_message
+        else:
+            conn.commit()
+            exp_str = add_sub_days(user_id, reward_amount)
+            return True, "SUCCESS", f"⭐ +{reward_amount} يوم اشتراك مجاني (حتى {exp_str})", custom_message
+
+# --- الإحصائيات والكاش ---
 
 def get_stats():
     with get_db() as conn:
