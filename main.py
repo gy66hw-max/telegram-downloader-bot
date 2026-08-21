@@ -17,12 +17,16 @@ from developer import dev_router
 from services import worker
 from middlewares import AntiSpamMiddleware, BanCheckMiddleware
 
-# خادم ويب وهمي لإرضاء Render وتوفير منفذ Port
+# خادم ويب وهمي لإرضاء Render وتوفير منفذ Port والدعم الكامل لـ UptimeRobot
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is live!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_health_check_server():
     port = int(os.environ.get("PORT", 8080))
