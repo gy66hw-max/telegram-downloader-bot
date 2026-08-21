@@ -5,10 +5,11 @@ from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.exceptions import TelegramBadRequest
+
 from config import ADMIN_ID, DEV_USERNAME
 from database import (
     get_or_create_user, check_sub_status, increment_usage, 
-    get_user_ref_count, is_user_banned
+    get_user_ref_count, is_user_banned, claim_gift_link
 )
 from keyboards import get_main_keyboard, get_sub_purchase_inline
 from services import download_queue
@@ -28,12 +29,20 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
         return
 
     referrer_id = None
-    if command.args and command.args.startswith("ref_"):
-        try:
-            referrer_id = int(command.args.split("_")[1])
-        except ValueError:
-            pass
-    
+    gift_code = None
+
+    # فحص المعاملات الممررة مع /start
+    if command.args:
+        args = command.args.strip()
+        if args.startswith("ref_"):
+            try:
+                referrer_id = int(args.split("_")[1])
+            except ValueError:
+                pass
+        elif args.startswith("gift_"):
+            gift_code = args
+
+    # إنشاء أو جلب بيانات المستخدم
     user, is_new, referrer_info = get_or_create_user(
         user_id=message.from_user.id,
         first_name=message.from_user.first_name,
@@ -41,6 +50,7 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
         referrer_id=referrer_id
     )
 
+    # 2. إرسال إشعارات الإحالة والأدمن للمستخدم الجديد فقط
     if is_new:
         safe_name = html.escape(message.from_user.first_name or "مستخدم")
         username_str = f"@{message.from_user.username}" if message.from_user.username else "بدون معرف"
@@ -75,6 +85,28 @@ async def start_cmd(message: Message, command: CommandObject, state: FSMContext)
         except Exception as e:
             print(f"فشل إرسال إشعار الأدمن: {e}")
 
+    # 3. معالجة مطالبة رابط المكافأة
+    if gift_code:
+        success, status, result_msg, custom_msg = claim_gift_link(message.from_user.id, gift_code)
+        if success:
+            gift_notice = (
+                f"🎉 <b>مبروك! تم استلام المكافأة بنجاح!</b>\n\n"
+                f"🎁 <b>المكافأة:</b> {result_msg}\n"
+                f"💬 <i>{html.escape(custom_msg)}</i>"
+            )
+            await message.answer(gift_notice, parse_mode="HTML")
+        elif status == "ALREADY_CLAIMED":
+            await message.answer("⚠️ <b>لقد قمت باستلام هذه المكافأة سابقاً!</b>", parse_mode="HTML")
+        elif status == "EXPIRED":
+            await message.answer("❌ <b>عذراً، لقد اكتمل العدد المسموح به وانتهت المكافأة!</b>", parse_mode="HTML")
+        elif status == "NOT_FOUND":
+            await message.answer("❌ <b>رابط المكافأة غير صحيح أو منتهي الصلاحية.</b>", parse_mode="HTML")
+
+        # 🛑 إذا كان المستخدم قديماً ومفعل البوت سابقاً، يتم الاكتفاء برسالة المكافأة فقط والتوقف هنا
+        if not is_new:
+            return
+
+    # 4. عرض الكليشة والقائمة الرئيسية (للمستخدمين الجدد أو عند الضغط على /start العادي)
     ref_count = get_user_ref_count(message.from_user.id)
     user_coins = user['coins']
     safe_user_name = html.escape(message.from_user.first_name or "مستخدم")
@@ -121,7 +153,6 @@ async def my_sub(callback: CallbackQuery):
             reply_markup=get_sub_purchase_inline()
         )
 
-
 @users_router.callback_query(F.data == "cmd:ref_link")
 async def ref_link(callback: CallbackQuery):
     if is_user_banned(callback.from_user.id):
@@ -146,11 +177,10 @@ async def ref_link(callback: CallbackQuery):
             parse_mode="HTML",
             reply_markup=get_main_keyboard(callback.from_user.id)
         )
-        await callback.answer() # تم التعديل بنجاح
+        await callback.answer()
     except TelegramBadRequest:
-        # إذا لم يتغير المحتوى، لا تفعل شيئاً سوى إغلاق التنبيه
         await callback.answer("أنت تشاهد الرسالة بالفعل.")
-        
+
 @users_router.callback_query(F.data == "cmd:use_service")
 async def ask_for_link(callback: CallbackQuery, state: FSMContext):
     if is_user_banned(callback.from_user.id):
